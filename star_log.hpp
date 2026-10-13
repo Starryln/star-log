@@ -39,12 +39,6 @@ enum LogSeverity {
     FATAL = 4
 };
 
-inline char SeverityChar(int s)
-{
-    static const char kChars[] = {'D', 'I', 'W', 'E', 'F'};
-    return (s >= 0 && s <= 4) ? kChars[s] : '?';
-}
-
 inline const char* SeverityName (int s)
 {
     switch (s) 
@@ -222,6 +216,7 @@ public:
         record += std::to_string(line);
         record += ']';
         record += msg;
+        record += '\n';
 
         if (log_to_stderr_)
         {
