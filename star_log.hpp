@@ -1,17 +1,30 @@
 #ifndef STAR_LOG_HPP
 #define STAR_LOG_HPP
 
-#include <cstddef>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ostream>
+#include <ctime>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <mutex>
+#include <sstream>
 #include <streambuf>
 #include <string>
-#include <time.h>
+#include <thread>
+
+#if defined(_WIN32)
+#include <io.h>
+#include <windows.h>
+#else
 #include <unistd.h>
 #if defined(__linux__)
-#  include <sys/syscall.h>
+#include <sys/syscall.h>
+#endif
 #endif
 
 
@@ -24,7 +37,7 @@ enum LogSeverity {
     WARN  = 2,
     ERROR = 3,
     FATAL = 4
-}
+};
 
 inline char SeverityChar(int s)
 {
@@ -37,8 +50,8 @@ inline const char* SeverityName (int s)
     switch (s) 
     {
         case DEBUG: return "DEBUG";
-        case INFO : return "INFO";
-        case WARN : return "WARN";
+        case INFO : return "INFO ";
+        case WARN : return "WARN ";
         case ERROR: return "ERROR";
         case FATAL: return "FATAL";
         default:    return "UNKNOWN";
@@ -116,7 +129,7 @@ inline void FormatTime(char* buf, std::size_t n)
 #else
     localtime_r(&secs, &tm_buf);
 #endif
-    std::snprintf(buf, n, "%04d-%02d-%02d %02d-%02d-%02d.%03ld",
+    std::snprintf(buf, n, "%04d-%02d-%02d %02d:%02d:%02d.%03ld",
                   tm_buf.tm_year + 1900, tm_buf.tm_mon + 1, tm_buf.tm_mday,
                   tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, micros);
 }
@@ -154,7 +167,7 @@ public:
         log_to_stderr_ = enable;
     }
 
-    bool LogToStderr const
+    bool LogToStderr() const
     {
         std::lock_guard<std::mutex> lk(mutex_);
         return log_to_stderr_;
@@ -162,7 +175,7 @@ public:
 
     void SetLogToFile(const std::string& path)
     {
-        sstd::lock_guard<std::mutex> lk(mutex_);
+        std::lock_guard<std::mutex> lk(mutex_);
         if (file_stream_.is_open()) file_stream_.close();
         if(!path.empty())
         {
@@ -177,7 +190,7 @@ public:
         use_color_ = enable;
     }
 
-    bool Color const
+    bool Color() const
     {
         std::lock_guard<std::mutex> lk(mutex_);
         return use_color_;
@@ -196,11 +209,14 @@ public:
         uitls::FormatTime(timebuf, sizeof(timebuf));
         std::string record;
         record.reserve(128 + msg.size());
-        record += SetColor(severity);
+        record += '[' ;
+        record += SeverityName(severity);
+        record += ']';
+        record += '[';
         record += timebuf;
-        record += ' ';
-        record += std::to_string(uitls::ThreadId());
-        record += ' ';
+        record += ']';
+        record += '[' + std::to_string(uitls::ThreadId()) + ']';
+        record += '[';
         record += uitls::Basename(file);
         record += ':';
         record += std::to_string(line);
@@ -245,7 +261,7 @@ public:
 
 private:
     Logger() : min_level_(DEBUG), log_to_stderr_(true), use_color_(true) {}
-    ~Logger(): 
+    ~Logger()
     {
         if (file_stream_.is_open()) file_stream_.close();
     }
@@ -257,7 +273,7 @@ private:
     std::ofstream    file_stream_;
     mutable std::mutex mutex_;
 
-}
+};
 
 class LogMessage
 {
@@ -273,9 +289,16 @@ public:
     {
         if(enabled_) 
         {
-
+            Logger::Instance().Write(severity_, file_, line_, stream_.str());
         }
     }
+
+    std::ostream& stream()
+    {
+        return enabled_? static_cast<std::ostream&>(stream_) : uitls::NullOstream();
+    }
+
+
 
 private:
     int                 severity_;
@@ -284,14 +307,14 @@ private:
     bool                enabled_;
     std::ostringstream  stream_;
 
-}
+};
 
 class LogMessageVoidify
 {
 public:
     LogMessageVoidify() = default;
     void operator&(std::ostream&) const {}
-}
+};
 
 /* -----> 接口函数 <----- */
 inline void SetMinLogLevel(int level)  { Logger::Instance().SetMinLogLevel(level); }
@@ -311,12 +334,12 @@ inline void FlushLog()                 { Logger::Instance().Flush(); }
 
 // ---- 普通日志 ----
 #define LOG(severity) \
-    ::glog::LogMessage(::glog::severity, __FILE__, __LINE__).stream()
+    ::star_log::LogMessage(::star_log::severity, __FILE__, __LINE__).stream()
 
 // ---- 条件日志：condition 为真时才输出 ----
 #define LOG_IF(severity, condition) \
-    !(condition) ? (void)0 : ::glog::LogMessageVoidify() & \
-        ::glog::LogMessage(::glog::severity, __FILE__, __LINE__).stream()
+    !(condition) ? (void)0 : ::star_log::LogMessageVoidify() & \
+        ::star_log::LogMessage(::star_log::severity, __FILE__, __LINE__).stream()
 
 
 
